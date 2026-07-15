@@ -1,0 +1,28 @@
+{
+  "name": "basi-di-dati-e-web",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rebeccafulginiti/Project-IBUY-of-Databases-and-web.git"
+  },
+  "author": "rebs",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/rebeccafulginiti/Project-IBUY-of-Databases-and-web/issues"
+  },
+  "homepage": "https://github.com/rebeccafulginiti/Project-IBUY-of-Databases-and-web#readme",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "express": "^5.2.1",
+    "express-fileupload": "^1.5.2",
+    "jose": "^6.2.3",
+    "pg": "^8.22.0",
+    "swagger-autogen": "^2.23.7",
+    "swagger-ui-express": "^5.0.1"
+  }
+}

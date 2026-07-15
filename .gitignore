@@ -1,0 +1,16 @@
+# Ignora le dipendenze di Node (molto pesanti!)
+node/node_modules/
+
+# Ignora il file con le password del database
+node/.env
+
+# Ignora il contenuto delle cartelle delle immagini ma tieni i .gitkeep
+node/product_Picture/*
+!node/product_Picture/.gitkeep
+
+node/profile_Picture/*
+!node/profile_Picture/.gitkeep
+
+# Escludi anche foto sfuse fuori dalle cartelle se ce ne sono (come rebecca.jpg)
+*.jpg
+*.jpeg
