@@ -679,10 +679,7 @@ Consideriamo la collezione dei PRODUCT:
   "page": 0,
   "q": "cult",
   "type": null,
-  "next": {
-    "href": "/products?q=cult&size=20&page=1",
-    "method": "GET"
-  },
+  "next":"/products?q=cult&size=20&page=1",
   "prev": null,
   "res": [
     {
