@@ -719,13 +719,14 @@ const patchMe = async (req,res) => {
         }
 
      try {
+         const hash = await bcrypt.hash(req.body.password,10)
         const  params = {}
         params.street = (req.body.street === undefined || req.body.street === "") ? null : req.body.street
         params.city = (req.body.city === undefined || req.body.city === "" ) ? null : req.body.city
         params.zip_code =  (req.body.zip_code === undefined || req.body.zip_code === ""  ) ? null : req.body.zip_code
         params.street_number = (req.body.street_number === undefined || req.body.street_number === "" ) ? null : req.body.street_number
         params.apartment_floor = (req.body.apartment_floor === undefined || req.body.apartment_floor === "" ) ? null : req.body.apartment_floor
-        params.password = req.body.password
+        params.password = hash
         params.type = type_of_user
         params.VAT_NUMBER = (req.body.VAT_NUMBER  === undefined || req.body.VAT_NUMBER === "" ) ? null : (req.body.VAT_NUMBER )
 
