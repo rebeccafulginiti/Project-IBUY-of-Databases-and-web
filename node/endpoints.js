@@ -3,7 +3,7 @@ const pg = require("pg")
 const bcrypt = require("bcrypt")
 const {SignJWT, jwtVerify, decodeJwt} = require('jose')
 //doc end si può mettere
-const jwt_secret = process.env.DB_jwt_token
+const jwt_secret = process.env.DB_jwt_secret
 const jwt_key = new TextEncoder().encode(jwt_secret)
 
 const pool = new pg.Pool({
@@ -30,6 +30,10 @@ module.exports = function(app) {
     app.get('/users/me/image', auth, getMyPhoto)
     app.post('/users/me/image', auth, postMyPhoto)
     app.patch('/users/me', auth , patchMe )
+// my reviews
+    app.get('/users/me/reviews', auth, getMyReviews)
+    app.post('/users/me/reviews', auth, postMyReviews)
+//NUOVO 
 // my purchases
     app.get('/users/me/purchases',auth, getMyPurchases)
     app.post('/users/me/purchases',auth, postMyNewPurchase)
@@ -719,13 +723,14 @@ const patchMe = async (req,res) => {
         }
 
      try {
+        const hash = await bcrypt.hash(req.body.password,10)
         const  params = {}
         params.street = (req.body.street === undefined || req.body.street === "") ? null : req.body.street
         params.city = (req.body.city === undefined || req.body.city === "" ) ? null : req.body.city
         params.zip_code =  (req.body.zip_code === undefined || req.body.zip_code === ""  ) ? null : req.body.zip_code
         params.street_number = (req.body.street_number === undefined || req.body.street_number === "" ) ? null : req.body.street_number
         params.apartment_floor = (req.body.apartment_floor === undefined || req.body.apartment_floor === "" ) ? null : req.body.apartment_floor
-        params.password = req.body.password
+        params.password =  hash
         params.type = type_of_user
         params.VAT_NUMBER = (req.body.VAT_NUMBER  === undefined || req.body.VAT_NUMBER === "" ) ? null : (req.body.VAT_NUMBER )
 
@@ -745,6 +750,143 @@ const patchMe = async (req,res) => {
             }
         }
         console.log(err)
+        return res.status(500).send({message: "Query error"})
+    }
+
+}
+// my reviews
+
+const getMyReviews = async (req,res) => {
+// #swagger.tags = ['Profile']
+// #swagger.summary = 'Retrive the reviews of products that the current user made'
+// #swagger.description ='Authenticated endpoint to retrive the personal reviews products history of the currently logged-in user.' 
+
+//controlli per page e size che siano corretti 
+ //facciamo una sanificazione dei parametri 
+  if (req.query.page !== undefined && req.query.page !== "" ) {
+            if ((isNaN(req.query.page)) || (req.query.page < 0) ) {
+                return  res.status(400).send({message: "You have entered a number for the page that's invalid !"})
+            }
+        }
+      if (req.query.size !== undefined && req.query.size !== "" ) {
+            if ((isNaN(req.query.size)) || (req.query.size < 0 || req.query.size > 50) ) {
+                return  res.status(400).send({message: "You have entered a number for the size that's invalid!"})
+            }
+        }
+    
+    const product_id_parsata = parseInt(req.query.product_id, 10);
+    if ((isNaN(product_id_parsata)) || (req.query.product_id < 0 || req.query.product_id > 5)) {
+        return res.status(400).send({ message: "Bad Request: Product_id must be a valid number between 1 and 5!" });
+    }
+
+    try {
+ const params = {}
+ params.rating_product= product_id_parsata
+ params.page= req.query.page ? parseInt(req.query.page) : 0
+ params.size = req.query.size ?  parseInt(req.query.size) : 20 
+ params.previous= params.page > 0 ? params.page -1 : null
+ params.next = null 
+
+const vendorquery= `
+SELECT username_vendor
+FROM  Products
+WHERE product_id = $1 
+`
+const results = await pool.query(vendorquery,[ product_id_parsata])
+    if (results.rows.length === 0 ) {
+    return res.status(400).send({message : "Bad Request: Product doesn't exist!"})
+    }
+    const username_vendor_extract = results.rows[0].username_vendor
+
+const query = `
+SELECT *
+FROM Reviews 
+WHERE rating_product = $1 AND username_buyer= $2
+LIMIT $3 OFFSET $4;
+`
+const qparams = [params.rating_product, req.user,params.size+1, params.size*params.page ]
+       const final_results = await pool.query(query, qparams)
+       if(final_results.rows.length > params.size) {
+            params.next = params.page +1
+             final_results.rows= final_results.rows.slice(0,-1)
+        }
+         // abbimao tutte le rows dei risulati trovati 
+        params.results = final_results.rows;
+
+        // generiamo i link ciclando su ogni prodotto della lista 
+        for (const row of params.results) {
+         row.username_vendor = username_vendor_extract;
+         const linkaggiuntivi = linkGeneratorVendors({ username: username_vendor_extract }, req.user)
+          row.links = linkaggiuntivi
+            } 
+     return res.status(200).send({
+         message: "Reviews retrieved successfully!!" ,
+         res :  params.results
+        })
+
+    } catch (err) {
+        console.log(err)
+        return res.status(500).send({message: "Query error"})
+    }
+}
+
+
+
+
+const postMyReviews= async (req,res) => {
+// #swagger.tags = ['Profile']
+// #swagger.summary = 'Add a new review to the reviews history'
+// #swagger.description ='Authenticated endpoint to register a new review of a product bought by the current logged-in user.' 
+
+//controlliamo un po' il product id che ci sia e che sia un numero
+   if (!req.body || req.body.product_id === undefined || req.body.product_id === "") {
+        return res.status(400).send({ message: "Bad Request: Product_id is required and cannot be empty!" });
+    }
+    if (isNaN(Number(req.body.product_id))){
+        return res.status(400).send({ message: "Bad Request: Product_id must be a valid number!" });
+    }
+    const product_id_parsata = parseInt(req.body.product_id, 10);
+    if (isNaN(product_id_parsata)) {
+        return res.status(400).send({ message: "Bad Request: Product_id must be a valid number!" });
+    }
+    const rating_product_parsata = parseInt(req.body.rating_product, 10);
+    if (isNaN(rating_product_parsata)) {
+         return res.status(400).send({ message: "Bad Request: Product_id must be a valid number!" });
+    }
+    if (!(isNaN(rating_product_parsata)) && rating_product_parsata < 0 || rating_product_parsata > 5 ) {
+        return res.status(400).send({ message: "Bad Request: Product_id must be a valid number between 1 and 5!" })
+    }
+    try {
+    //estraiamo inanzitutto il prodotto dai products per vedere se esite e se lui non è il vendor 
+    // non vogliamo che il vendor faccia una recensione del suo prodotto 
+    const productquery = `
+    SELECT *
+    FROM Products 
+    WHERE product_id = $1;
+    `
+    const results = await pool.query(productquery,[ product_id_parsata])
+    if (results.rows.length === 0 ) {
+    return res.status(400).send({message : "Bad Request: Product doesn't exist!"})
+    }
+    const username_vendor_extract = results.rows[0].username_vendor
+
+    if (username_vendor_extract === req.user) {
+        return res.status(400).send({message : "You can't review your own products!"})
+    }
+
+    // controllino sulla lunghezza
+    if (req.body.comment_product.toString().length > 50 ) {
+         return res.status(400).send({message : "The comment must be 50 character max!"})
+    }
+    //finally posso fare la query e aggiungere l'acquisto
+    const query = `
+    INSERT INTO Reviews  (username_buyer, product_id, rating_product, comment_product)
+    VALUES ($1, $2, $3, $4) ;
+    `
+    const qparams= [ req.user, product_id_parsata,rating_product_parsata, req.body.comment_product ]
+     await pool.query(query, qparams)
+     return res.status(201).send({ message: "Purchase added!"  }) 
+    } catch(err) {
         return res.status(500).send({message: "Query error"})
     }
 
