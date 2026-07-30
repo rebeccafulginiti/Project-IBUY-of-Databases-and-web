@@ -38,9 +38,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "VAT_NUMBER": {
-                    "example": "any"
-                  },
                   "username": {
                     "example": "any"
                   },
@@ -72,7 +69,7 @@
         }
       }
     },
-    "/login": {
+    "/sessions": {
       "post": {
         "tags": [
           "Authentication"
@@ -110,10 +107,8 @@
             }
           }
         }
-      }
-    },
-    "/refresh": {
-      "post": {
+      },
+      "patch": {
         "tags": [
           "Authentication"
         ],
@@ -147,10 +142,8 @@
             }
           }
         }
-      }
-    },
-    "/logout": {
-      "post": {
+      },
+      "delete": {
         "tags": [
           "Authentication"
         ],
@@ -186,7 +179,7 @@
         ]
       }
     },
-    "/users/vendors": {
+    "/vendors": {
       "get": {
         "tags": [
           "Vendors"
@@ -244,7 +237,7 @@
         ]
       }
     },
-    "/users/vendors/{username}": {
+    "/vendors/{username}": {
       "get": {
         "tags": [
           "Vendors"
@@ -292,7 +285,7 @@
         ]
       }
     },
-    "/users/vendors/{username}/image": {
+    "/vendors/{username}/image": {
       "get": {
         "tags": [
           "Vendors"
@@ -340,7 +333,73 @@
         ]
       }
     },
-    "/users/me": {
+    "/vendors/{username_vendor}/products": {
+      "get": {
+        "tags": [
+          "Vendors"
+        ],
+        "summary": "Get products by vendor username",
+        "description": "Returns a paginated list of products offered by a specific vendor.",
+        "parameters": [
+          {
+            "name": "username_vendor",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "product_name",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/me": {
       "get": {
         "tags": [
           "Profile"
@@ -419,9 +478,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "VAT_NUMBER": {
-                    "example": "any"
-                  },
                   "street": {
                     "example": "any"
                   },
@@ -437,7 +493,13 @@
                   "apartment_floor": {
                     "example": "any"
                   },
+                  "VAT_NUMBER": {
+                    "example": "any"
+                  },
                   "password": {
+                    "example": "any"
+                  },
+                  "vat_number": {
                     "example": "any"
                   }
                 }
@@ -447,7 +509,7 @@
         }
       }
     },
-    "/users/me/image": {
+    "/me/image": {
       "get": {
         "tags": [
           "Profile"
@@ -541,10 +603,10 @@
         }
       }
     },
-    "/users/me/purchases": {
+    "/purchases": {
       "get": {
         "tags": [
-          "Profile"
+          "Purchases"
         ],
         "summary": "Retrive current user profile purchases",
         "description": "Authenticated endpoint to retrive the personal purchase history of the currently logged-in user.",
@@ -614,7 +676,7 @@
       },
       "post": {
         "tags": [
-          "Profile"
+          "Purchases"
         ],
         "summary": "Add a new order to the purchase history",
         "description": "Authenticated endpoint to register a new purchase for the current logged-in user.",
@@ -662,10 +724,10 @@
         }
       }
     },
-    "/users/me/followers": {
+    "/followers": {
       "get": {
         "tags": [
-          "Profile"
+          "Follows"
         ],
         "summary": "Retrive current user followers ",
         "description": "Authenticated endpoint to retrive the list of followers of the currently logged-in user.",
@@ -723,10 +785,10 @@
         ]
       }
     },
-    "/users/me/followings": {
+    "/followings": {
       "get": {
         "tags": [
-          "Profile"
+          "Follows"
         ],
         "summary": "Retrive current user followings ",
         "description": "Authenticated endpoint to retrive the list of followings of the currently logged-in user.",
@@ -782,7 +844,7 @@
       },
       "post": {
         "tags": [
-          "Profile"
+          "Follows"
         ],
         "summary": "Follow a new vendor",
         "description": "Authenticated endpoint allowing the currently logged-in user to follow a specific vendor by providing their username.",
@@ -833,10 +895,10 @@
         }
       }
     },
-    "/users/me/followings/{following}": {
+    "/followings/{following}": {
       "delete": {
         "tags": [
-          "Profile"
+          "Follows"
         ],
         "summary": "Unfollow a vendor",
         "description": "Authenticated endpoint for unfollowing a vendor that the current-user was following.",
@@ -1063,6 +1125,9 @@
           "401": {
             "description": "Unauthorized"
           },
+          "403": {
+            "description": "Forbidden"
+          },
           "404": {
             "description": "Not Found"
           },
@@ -1164,9 +1229,6 @@
           },
           "401": {
             "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden"
           },
           "404": {
             "description": "Not Found"

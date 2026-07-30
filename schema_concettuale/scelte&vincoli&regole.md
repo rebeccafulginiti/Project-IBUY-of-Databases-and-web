@@ -4,7 +4,7 @@ Matricola : 26182A
 
 ### **SCELTE PROGETTUALI**   
 
-- **Scelta chiave Purchase:** La chiave primaria della tabella Purchase è una chiave composta dalla terna ( timestamp_transaction, username_vendor, username_buyer, product_id). Questa scelta garantisce l'unicità di ogni singola transazione, impedendo che lo stesso utente possa effettuare contemporaneamente più acquisti dello stesso identico prodotto.
+- **Scelta chiave Purchase:** Come chiave primaria della tabella Purchase si è scelto di utilizzare un identificativo univoco generato dal sistema (purchase_id). Rispetto all'uso di una chiave composta, l'aggiunta di questo ID unico semplifica la struttura della tabella e rende più veloce e agevole la gestione delle transazioni nel database.
 
 - **Scelta chiave User:** La chiave primaria scelta per l'identificazione degli utenti è l'attributo username.  Al fine di garantire che non esistano due profili associati alla medesima mail, si è scelto di modellare l’attributo mail come chiave alternativa. Tale attributo non può essere modificato dopo la registrazione per mantenere la consistenza è integrità dei dati.    
 

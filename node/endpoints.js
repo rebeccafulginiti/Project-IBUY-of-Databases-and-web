@@ -3,7 +3,7 @@ const pg = require("pg")
 const bcrypt = require("bcrypt")
 const {SignJWT, jwtVerify, decodeJwt} = require('jose')
 //doc end si può mettere
-const jwt_secret = process.env.DB_jwt_token
+const jwt_secret = process.env.DB_jwt_secret
 const jwt_key = new TextEncoder().encode(jwt_secret)
 
 const pool = new pg.Pool({
@@ -18,28 +18,29 @@ const pool = new pg.Pool({
 module.exports = function(app) {
 //sessioni + autenticazioni + creazione di nuovo user 
     app.post('/users', registerNewUser)
-    app.post('/login', login)
-    app.post('/refresh', refresh)
-    app.post('/logout', auth, logout)
+    app.post('/sessions', login)
+    app.patch('/sessions', refresh)
+    app.delete('/sessions', auth, logout)
 //vendors
-    app.get('/users/vendors', auth, getVendors)
-    app.get('/users/vendors/:username', auth,  getVendorProfile)
-    app.get('/users/vendors/:username/image', auth, getVendorProfilePhoto)
+    app.get('/vendors', auth, getVendors)
+    app.get('/vendors/:username', auth,  getVendorProfile)
+    app.get('/vendors/:username/image', auth, getVendorProfilePhoto)
+    app.get('/vendors/:username_vendor/products', auth, getVendorProducts)
 //profile (me) + my image
-    app.get('/users/me', auth, getMe)
-    app.get('/users/me/image', auth, getMyPhoto)
-    app.post('/users/me/image', auth, postMyPhoto)
-    app.patch('/users/me', auth , patchMe )
+    app.get('/me', auth, getMe)
+    app.get('/me/image', auth, getMyPhoto)
+    app.post('/me/image', auth, postMyPhoto)
+    app.patch('/me', auth , patchMe )
 // my purchases
-    app.get('/users/me/purchases',auth, getMyPurchases)
-    app.post('/users/me/purchases',auth, postMyNewPurchase)
+    app.get('/purchases',auth, getMyPurchases)
+    app.post('/purchases',auth, postMyNewPurchase)
 //follows 
 // ---> followers
-    app.get('/users/me/followers',auth, getMyFollowers)
+    app.get('/followers',auth, getMyFollowers)
 // ---> following
-    app.get('/users/me/followings', auth, getMyFollowings)
-    app.post('/users/me/followings',auth, postMyNewFollowings)
-    app.delete('/users/me/followings/:following',auth, deleteFollowing) 
+    app.get('/followings', auth, getMyFollowings)
+    app.post('/followings',auth, postMyNewFollowings)
+    app.delete('/followings/:following',auth, deleteFollowing) 
 //products + my product image
     app.get('/products', getProducts)
     app.post('/products', auth, postNewProduct)
@@ -60,7 +61,6 @@ if (!req.headers.authorization) {
     try{
         const {payload}= await jwtVerify(token, jwt_key)
         req.user = payload.username
-        req.type= payload.type
            next()
     } catch(err) {
         return res.status(401).send({message : 'Token old or invalid'})
@@ -101,47 +101,45 @@ const linkGeneratorProducts = (product, current_product_id) => {
 
 }
 // funzione che mi crea i link HATEOAS  per i vendors che funzionano perchè ti piace compliacarti la vita
-const linkGeneratorVendors = (user,user_logged) => {
+const linkGeneratorVendors = (vendor,user_logged) => {
     // pensiamo al fatto che dobbiamo definire questi link 
     //ricordati che i products_LNK >> è la lista dei prodotti  che vende il vendor 
     const links = {
         "image_LNK" : {
-         "href": `/users/vendors/${user.username}/image`,
+         "href": `/vendors/${vendor.username_vendor}/image`,
         "method" : "GET"
         },
         "list_products_LNK" : {
-        "href" :`/users/vendors/${user.username}/products`,
+        "href" :`/vendors/${vendor.username_vendor}/products`,
         "method": "GET"
         }
     }
-   if (user_logged === user.username) {
+   if (user_logged === vendor.username_vendor) {
         links.patch = {
-            "href": `/users/vendors/${user.username}`,
+            "href": `/vendors/${vendor.username_vendor}`,
             "method" : "PATCH"
         }
         
         links.purchase_LNK = {
-            "href": `/users/vendors/${user.username}/purchases`,
+            "href": `/purchases/${vendor.username_vendor}`,
             "method": "GET"
         }
 
         links.followings_LNK = {
-            "href": `/users/vendors/${user.username}/followings`,
+            "href": `/followings/${vendor.username_vendor}`,
             "method": "GET"
         }
-        // li aggiungiamon se il type dello user è = vendor
-        if (user.type === 'vendor') {
-            links.followers_LNK = {
-                "href": `/users/vendors/${user.username}/followers`,
+        links.followers_LNK = {
+                "href": `/followers/${vendor.username_vendor}`,
                 "method": "GET"
             }
-        }
+        
     }
     // facciamo un controllo così questa funzione la posso usare  anche nel singolo vendor e non creare un loop di link ipertestuali facendo ritornare sempre il vendor_LNK 
     //lo facciamo ritornare sempre solo se siamo nella collezione /users/vendors
-     if (user_logged !== user.username) {
+     if (user_logged !== user.username_vendor) {
          links.vendor_LNK = {
-        "href" :`/users/vendors/${user.username}`,
+        "href" :`/vendors/${user.username_vendor}`,
         "method": "GET"
          }
      }
@@ -159,13 +157,7 @@ if (!req.body) {
       return res.status(400).send({message: "Bad Request: No body provided"})
     } 
 // facciamo un po' di controlli sulle possibili bad request 
-//determinimao il tipo di user senza farlo inserire 
-let type_of_user 
-        if (req.body.VAT_NUMBER !== undefined && req.body.VAT_NUMBER !== "" && req.body.VAT_NUMBER !== null ) {
-            type_of_user = "vendor";
-        }  else  {
-            type_of_user = "user" ;
-        }
+
 // controllo username
     if (!req.body.username || req.body.username.toString().trim() === "" ) {
         return res.status(400).send({message : "Bad request: Username cannot be empty!"})
@@ -215,12 +207,7 @@ let type_of_user
                 return  res.status(400).send({message: "Bad Request: You have entered an apartment floor that's invalid!"})
             }
         }
-// controllo sacro sul vat_number
-     if (req.body.VAT_NUMBER !== undefined &&  req.body.VAT_NUMBER !== null && req.body.VAT_NUMBER !== "" ) {
-            if ((req.body.VAT_NUMBER.toString().length !==15)) {
-                return  res.status(400).send({message: "Bad Request: VAT_NUMBER must be a string of exactly 15 character!"})
-            }
-        }
+
  try {
 
     const hash = await bcrypt.hash(req.body.password,10)
@@ -233,14 +220,13 @@ let type_of_user
         params.street = (req.body.street === undefined || req.body.street === "") ? null : req.body.street
         params.street_number = (req.body.street_number === undefined || req.body.street_number === "" ) ? null : req.body.street_number
         params.apartment_floor = (req.body.apartment_floor === undefined || req.body.apartment_floor === "" ) ? null : req.body.apartment_floor
-        params.type = type_of_user
-        params.VAT_NUMBER = (req.body.VAT_NUMBER  === undefined || req.body.VAT_NUMBER === "" ) ? null : (req.body.VAT_NUMBER )
+       
 
         const query = `
-        INSERT INTO Users  (username,  mail, password, zip_code, city, street, street_number, apartment_floor, type, VAT_NUMBER)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+        INSERT INTO Users  (username,  mail, password, zip_code, city, street, street_number, apartment_floor)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
         ` 
-        const qvals = [params.username, params.mail, params.password,params.zip_code, params.city, params.street,params.street_number,params.apartment_floor, params.type, params.VAT_NUMBER ]
+        const qvals = [params.username, params.mail, params.password,params.zip_code, params.city, params.street,params.street_number,params.apartment_floor ]
     
          await pool.query(query, qvals);  
         return res.status(201).send({ message: "User created!"}) 
@@ -249,9 +235,6 @@ let type_of_user
         if (err.code === '23505') {
              if (err.detail.includes('username')){
               return res.status(409).send({message : "This username already exist. Pick another one!"})
-            }
-            if (err.detail.includes('vat_number')){
-              return res.status(409).send({message : "This VAT_NUMBER already exist. Pick another one!"})   
             }
             if (err.detail.includes('mail')) {
               return res.status(409).send({message : "This mail is already been used. Pick another one!"})
@@ -278,7 +261,7 @@ if (!req.body.password) {
     } 
     try {
         const query = `
-        SELECT password,type
+        SELECT password
         FROM users
         WHERE username = $1;
         `
@@ -295,10 +278,8 @@ if (!req.body.password) {
         if (!passwordOK) {
             return res.status(401).send({message: "Incorrect password"})
         }
-        const payload = {
-        username : req.body.username.trim() ,
-        type: results_user.type
-        }
+        const payload = {username : req.body.username.trim() }
+        
 
         //prendimao una chiave sessione per poi prenderla come chiave di criptazione
         const session_id = await bcrypt.genSalt(10)
@@ -435,11 +416,12 @@ const getVendors = async (req, res) => {
         params.next = null 
 
     const query = `
-    SELECT username
-    FROM Users
-    WHERE type = 'vendor'  AND  username ILIKE $1
-    ORDER BY username 
-    LIMIT $2 OFFSET $3 
+      SELECT U.username
+      FROM Users As U
+      JOIN Vendors AS V ON V.username_vendor = U.username
+      WHERE  U.username ILIKE $1
+      ORDER BY U.username 
+      LIMIT $2 OFFSET $3 ;
     `
     //OFFSET è quanti elementi devo saltare e LIMIT quanti ne devo mostare
     const qparams = [`%${params.q}%`, params.size+1, params.size*params.page]
@@ -488,9 +470,10 @@ if (req.params.username !== undefined && req.params.username !== "" ) {
     params.username = req.params.username
     const qparams = [params.username]
     const query = `
-    SELECT username, city
-    FROM users
-    WHERE type = 'vendor' AND  username = $1
+     SELECT U.username,U.city
+      FROM Users As U
+      JOIN Vendors AS V ON V.username_vendor = U.username
+      WHERE  U.username ILIKE $1
     `
     //OFFSET è quanti elementi devo saltare e LIMIT quanti ne devo mostare
     try {
@@ -530,9 +513,10 @@ if (req.params.username !== undefined && req.params.username !== "" ) {
 
     try {  
         const query = `
-        SELECT image_url
-        FROM users
-        WHERE type = 'vendor' AND username = $1; 
+       SELECT U.username
+       FROM Users As U
+       JOIN Vendors AS V ON V.username_vendor = U.username
+       WHERE  U.username = $1
         `
         //username del vendor
         const qparams = [req.params.username]
@@ -556,6 +540,82 @@ if (req.params.username !== undefined && req.params.username !== "" ) {
 
 }
 
+const getVendorProducts = async(req, res) => {
+    //#swagger.tags = ['Vendors']
+    // #swagger.summary = 'Get products by vendor username'
+    // #swagger.description = 'Returns a paginated list of products offered by a specific vendor.'
+
+// andiamo a richiedere la lista di tutti i products di un certo vendor 
+//controlli per page e size che siano corretti 
+ //facciamo una sanificazione dei parametri 
+  if (req.query.page !== undefined && req.query.page !== "" ) {
+            if ((isNaN(req.query.page)) || (req.query.page < 0) ) {
+                return  res.status(400).send({message: "Bad Request: You have entered a number for the page that's invalid !"})
+            }
+        }
+   if (req.query.size !== undefined && req.query.size !== "" ) {
+            if ((isNaN(req.query.size)) || (req.query.size < 0 || req.query.size > 50) ) {
+                return  res.status(400).send({message: "Bad Request: You have entered a number for the size that's invalid!"})
+            }
+        }
+    if (req.params.username_vendor === undefined || req.params.username_vendor === "" ) {
+            return res.status(400).send({ message: "Bad Request: The username_vendor parameter is required!"})
+        }
+    if (req.query.product_name !== undefined && req.query.product_name !== "") {
+        if (req.query.product_name.toString().length > 50) {
+            return res.status(400).send({ message: "Bad Request: Product name filter must be under 50 characters!" });
+        }
+    }
+    const params = {}
+        //se ciò che c'è tra parentesi non è vero allora parti dala pagina zero 
+        params.page= req.query.page ? parseInt(req.query.page) : 0
+        params.size = req.query.size ?  parseInt(req.query.size) : 20 
+        params.username_vendor = req.params.username_vendor
+        params.product_name = req.query.product_name === undefined ? "" : req.query.product_name;
+        params.previous= params.page > 0 ? params.page -1 : null
+        params.next = null 
+try {
+        // Verifichiamo prima che il vendor esista
+        const vendorCheckQuery = `
+            SELECT username_vendor
+            FROM Vendors 
+            WHERE username_vendor = $1;
+        `;
+        const vendorResult = await pool.query(vendorCheckQuery, [params.username_vendor]);
+
+        if (vendorResult.rows.length === 0) {
+            return res.status(400).send({ message: "Vendor not found!" });
+        }
+    const productsQuery = `
+            SELECT *
+            FROM Products
+            WHERE username_vendor = $1 AND name ILIKE $2
+            ORDER BY product_id ASC
+            LIMIT $3 OFFSET $4;
+        `;
+        
+        const results = await pool.query(productsQuery, [params.username_vendor,`%${params.product_name}%`, params.size+1, params.size*params.page]);
+        if(results.rows.length > params.size) {
+            params.next = params.page +1
+             results.rows= results.rows.slice(0,-1)
+        }
+          params.results = results.rows;
+        // generiamo i link ciclando su ogni prodotto della lista 
+         for (const product of params.results) {
+
+             const linkaggiuntivi = linkGeneratorProducts(product,null )
+                product.links = linkaggiuntivi
+            }  
+        return res.status(200).send({
+            message: "OK",
+            results: params.results
+        })
+    } catch (err) {
+        console.error(err);
+        return res.status(500).send({ message: "Query error" });
+    }
+}
+
 // profile 
 const getMe = async(req,res) => { 
 // #swagger.tags = ['Profile']
@@ -563,16 +623,46 @@ const getMe = async(req,res) => {
 // #swagger.description ='Authenticated endpoint to fetch the personal profile data of the currently logged-in user.'
 const qparams = [req.user]
     const query= `
-    SELECT username,  mail, type, zip_code, city, street, street_number, apartment_floor, VAT_NUMBER
-    FROM Users
-    WHERE username = $1 ;
+    SELECT U.username, U.mail, U.zip_code, U.city, U.street, U.street_number, U.apartment_floor, V.VAT_NUMBER
+    FROM Users AS U
+    LEFT JOIN Vendors AS V ON V.username_vendor = U.username
+    WHERE U.username = $1;
     `
     try {
        const results = await pool.query(query, qparams);
         const me = results.rows[0]
-       // aggiungiamo nel risultato anche il vendor_LNK che abbiamo calcolato con la nostra bella function
-       const linkaggiuntivi = linkGeneratorVendors(me, req.user )
-                me.links = linkaggiuntivi
+       // Link personali che servono SEMPRE a chi sta guardando il proprio profilo
+        const profileLinks = {
+            "image_LNK": {
+                "href": "/me/image",
+                "method": "GET"
+            },
+            "patch_LNK": {
+                "href": "/me",
+                "method": "PATCH"
+            }
+        };
+
+        if (me.vat_number) {
+             // aggiungiamo nel risultato anche i vendor_LNK che abbiamo calcolato con la nostra bella function
+            me.links = {
+                ...profileLinks,
+                ...linkGeneratorVendors(me, req.user)
+            };
+        } else {
+            // Se è uno User normale, mettiamo solo i link personali e i suoi acquisti/seguiti
+            me.links = {
+                ...profileLinks,
+                "purchases_LNK": {
+                    "href": `/purchases/${me.username}`,
+                    "method": "GET"
+                },
+                "followings_LNK": {
+                    "href": `/followings/${me.username}`,
+                    "method": "GET"
+                }
+            };
+        }
          return res.status(200).send({
          message: "OK" ,
          userData : me
@@ -590,13 +680,6 @@ const getMyPhoto = async( req,res) => {
 // #swagger.description ='Authenticated endpoint to request the personal profile photo of the currently logged-in user.' 
 //dirname >guarda che sei in questa cartella 
     try {  
-        const query = `
-        SELECT image_url
-        FROM users
-        WHERE username = $1
-        `
-        const qparams = [req.user]
-        const results= await pool.query(query, qparams)
         const file_path = __dirname + "/profile_Picture/" + req.user + ".jpg" 
         //gestisci tutto con una callback per non far crashare il sistema se non trova una foto
         return res.sendFile(file_path, (err) => {
@@ -644,15 +727,6 @@ const postMyPhoto = async (req,res) => {
     const path_db = "/profile_Picture/" + req.user + ".jpg"
     const path_uploaded = __dirname + path_db
 try {
-
-    const query = `
-        UPDATE users
-        SET image_url = $1   
-        WHERE username = $2;
-    `
-   
-    const qvals = [path_db, req.user];
-    await pool.query(query, qvals);  
     // Sposto il file sul server usando la stringa del percorso
     await req.files.my_image.mv(path_uploaded);
     return res.status(201).send({message: "Photo profile uploaded!"});
@@ -671,13 +745,6 @@ const patchMe = async (req,res) => {
   if (req.body === undefined) {
       return res.status(400).send({message: "Bad Request: No body provided"})
     }  
-
-    let type_of_user 
-        if (req.body.VAT_NUMBER !== undefined && req.body.VAT_NUMBER !== "" && req.body.VAT_NUMBER !== null ) {
-            type_of_user = "vendor";
-        } else  {
-            type_of_user = "user" ;
-        }
 
     // controllo la street se c'è
     if (req.body.street !== undefined && req.body.street !== null && req.body.street.toString().trim() !== "" ) {
@@ -719,24 +786,42 @@ const patchMe = async (req,res) => {
         }
 
      try {
-         const hash = await bcrypt.hash(req.body.password,10)
+        let hashedPassword = null;
+        if (req.body.password && req.body.password.trim() !== "") {
+            hashedPassword = await bcrypt.hash(req.body.password, 10);
+        }
         const  params = {}
         params.street = (req.body.street === undefined || req.body.street === "") ? null : req.body.street
         params.city = (req.body.city === undefined || req.body.city === "" ) ? null : req.body.city
         params.zip_code =  (req.body.zip_code === undefined || req.body.zip_code === ""  ) ? null : req.body.zip_code
         params.street_number = (req.body.street_number === undefined || req.body.street_number === "" ) ? null : req.body.street_number
         params.apartment_floor = (req.body.apartment_floor === undefined || req.body.apartment_floor === "" ) ? null : req.body.apartment_floor
-        params.password = hash
-        params.type = type_of_user
+        params.password = hashedPassword
         params.VAT_NUMBER = (req.body.VAT_NUMBER  === undefined || req.body.VAT_NUMBER === "" ) ? null : (req.body.VAT_NUMBER )
 
         const query = `
-        UPDATE Users
-        SET street=$2, city=$3, zip_code=$4, street_number=$5, apartment_floor=$6, password=$7,  type= $8, VAT_NUMBER=$9
-        WHERE username = $1 ;
+       UPDATE Users
+        SET street = COALESCE($2, street),
+        city = COALESCE($3, city),
+        zip_code = COALESCE($4, zip_code),
+        street_number = COALESCE($5, street_number),
+        apartment_floor = COALESCE($6, apartment_floor),
+        password = COALESCE($7, password)
+        WHERE username = $1;
         ` 
-        const qparams = [req.user, params.street,params.city, params.zip_code,params.street_number,params.apartment_floor,  params.password, params.type, params.VAT_NUMBER]
+        const qparams = [req.user, params.street,params.city, params.zip_code,params.street_number,params.apartment_floor,  params.password]
             await pool.query(query, qparams);  
+        // se inserisce anche il VAT_NUMBER allora dobbaimo aggiornare la tabella vendors 
+        if (req.body.vat_number) {
+            const BecomeVendorQuery = `
+                INSERT INTO Vendors (username_vendor, VAT_NUMBER)
+                VALUES ($1, $2)
+                ON CONFLICT (username_vendor) 
+                DO UPDATE SET VAT_NUMBER = EXCLUDED.VAT_NUMBER;
+            `;
+
+            await pool.query(BecomeVendorQuery, [req.user, req.body.VAT_NUMBER]);
+        }
         return res.status(200).send({ message: "User updated!" }) 
     } catch (err) {
     // gestiamo err  così con il code senza fare un'altra query al db per non anadre in una situation di race condition
@@ -755,7 +840,7 @@ const patchMe = async (req,res) => {
 //my purchases
 
 const getMyPurchases = async (req,res) => {
- // #swagger.tags = ['Profile']
+ // #swagger.tags = ['Purchases']
 // #swagger.summary = 'Retrive current user profile purchases'
 // #swagger.description ='Authenticated endpoint to retrive the personal purchase history of the currently logged-in user.' 
 
@@ -779,7 +864,6 @@ const getMyPurchases = async (req,res) => {
 
     const params = {}
         // se fa una ricerca per LIKE ma non viene passato nulla prendi tutto '%'
-        params.username_vendor = req.query.username_vendor ? `%${req.query.username_vendor}%` : '%'
         params.product_name = req.query.product_name ? `%${req.query.product_name }%` : '%'
         params.timestamp_transaction = req.query.timestamp_transaction === undefined ? "" : req.query.timestamp_transaction
         params.page= req.query.page ? parseInt(req.query.page) : 0
@@ -789,16 +873,16 @@ const getMyPurchases = async (req,res) => {
 
 
     const query = `
-        SELECT Pu.* , Pr.name
+        SELECT Pu.*, Pr.name AS product_name
         FROM Purchases AS Pu
-        JOIN Products AS Pr On ( Pr.product_id = Pu.product_id )
+        JOIN Products AS Pr ON (Pr.product_id = Pu.product_id)
         WHERE Pu.username_buyer = $1 
-        AND  Pu.username_vendor ILIKE $2  
-        AND Pr.name ILIKE $3
-        AND ($4 = '' OR CAST(Pu.timestamp_transaction AS date) = CAST($4 AS date))
-        LIMIT $5 OFFSET $6;
+        AND Pr.name ILIKE $2
+        AND ($3 = '' OR CAST(Pu.timestamp_transaction AS date) = CAST($3 AS date))
+        ORDER BY Pu.timestamp_transaction DESC
+        LIMIT $4 OFFSET $5;
         `
-    const qparams = [req.user, params.username_vendor, params.product_name, params.timestamp_transaction, params.size+1, params.size*params.page]
+    const qparams = [req.user, params.product_name, params.timestamp_transaction, params.size+1, params.size*params.page]
     try {
        const results = await pool.query(query, qparams)
        if(results.rows.length > params.size) {
@@ -808,11 +892,13 @@ const getMyPurchases = async (req,res) => {
          // abbimao tutte le rows dei risulati trovati 
         params.results = results.rows;
 
-        // generiamo i link ciclando su ogni prodotto della lista 
-         for (const vendor of params.results) {
-             const linkaggiuntivi = linkGeneratorVendors({ username: vendor.username_vendor }, req.user)
-                vendor.links = linkaggiuntivi
-            } 
+        // generiamo il link per ogni prodotto della lista 
+        for (const product of params.results ) {
+          product.links = {
+         "href": `/products/${product.product_id}`,
+         "method" : "GET"
+         }
+        }
      return res.status(200).send({
          message: "Users list retrieved successfully!" ,
          res :  params.results
@@ -827,7 +913,7 @@ const getMyPurchases = async (req,res) => {
 }
 
 const postMyNewPurchase = async(req,res) => {
- // #swagger.tags = ['Profile']
+ // #swagger.tags = ['Purchases']
 // #swagger.summary = 'Add a new order to the purchase history'
 // #swagger.description ='Authenticated endpoint to register a new purchase for the current logged-in user.' 
 
@@ -857,23 +943,12 @@ const postMyNewPurchase = async(req,res) => {
     const username_vendor_extract = results.rows[0].username_vendor
     const product_type = results.rows[0].type
     const product_quantity = results.rows[0].quantity
-    // se questo type è un type PHYSICAL >> dobbiamo fare un ulteriore controllo 
-    // facciamo un'altra chiamata al db perchè dobbiamo sapere se ha una quantità>> va scalata
-    // dobbiamo ricordarci che bisogna scalare di uno se la quantità è presente ma se non c'è non scaliamo nulla
-      if (product_quantity !== null) {
-        
-        if (product_quantity <= 0) {
-            return res.status(400).send({ message: "Bad Request: Product out of stock!" });
-        }
-        const quantity_update_query = `
-        UPDATE Products 
-        SET quantity = quantity - 1
-         WHERE product_id = $1
-         `
-        // Se c'è un limite ed è > 0, scaliamo di 1
-        await pool.query(quantity_update_query, [product_id_parsata])
-        }
-     // e bisogna sapere se questo user ha o meno un ADRESS che è valido >> sennò errore errorroso >> sempre nel caso in cui il product sia physical
+
+
+    if (username_vendor_extract === req.user) {
+        return res.status(400).send({message : "You cannot buy a product you sell!"})
+    }
+     //  bisogna sapere se questo user ha o meno un ADRESS che è valido >> sennò errore errorroso 
       if (product_type === 'physical') {
         const addressquery = `
         SELECT zip_code, city, street, street_number, apartment_floor
@@ -886,14 +961,29 @@ const postMyNewPurchase = async(req,res) => {
         if( !address || !address.zip_code || !address.city|| !address.street || !address.street_number ||!address.apartment_floor ) {
             return res.status(400).send({message: "Bad Request:You cannot place an order of a physical product without having a valid address!"})
         }
-
     }
+    // se questo type è un type PHYSICAL >> dobbiamo fare un ulteriore controllo 
+    // facciamo un'altra chiamata al db perchè dobbiamo sapere se ha una quantità>> va scalata
+    // dobbiamo ricordarci che bisogna scalare di uno se la quantità è presente ma se non c'è non scaliamo nulla
+      if (product_quantity !== null) {
+        
+        if (product_quantity <= 0) {
+            return res.status(400).send({ message: "Bad Request: Product out of stock!" });
+        }
+        const quantity_update_query = `
+        UPDATE Products 
+        SET quantity = quantity - 1
+         WHERE product_id = $1 AND quantity > 0;
+         `
+        // Se c'è un limite ed è > 0, scaliamo di 1
+        await pool.query(quantity_update_query, [product_id_parsata])
+        }
     //finally posso fare la query e aggiungere l'acquisto
     const query = `
-    INSERT INTO Purchases  (username_vendor, username_buyer,  product_id)
-    VALUES  ($1,  $2, $3);
+    INSERT INTO Purchases  ( username_buyer,  product_id)
+    VALUES  ($1,  $2);
     `
-    const qparams= [username_vendor_extract, req.user, product_id_parsata]
+    const qparams= [ req.user, product_id_parsata]
      await pool.query(query, qparams)
      return res.status(201).send({ message: "Purchase added!"  }) 
     } catch(err) {
@@ -906,14 +996,10 @@ const postMyNewPurchase = async(req,res) => {
 // --> follower
 
 const getMyFollowers = async(req,res) => {
- // #swagger.tags = ['Profile']
+ // #swagger.tags = ['Follows']
 // #swagger.summary = 'Retrive current user followers '
 // #swagger.description ='Authenticated endpoint to retrive the list of followers of the currently logged-in user.' 
 
- // becchiamoci un altro magic control per veedere se sei un vendor
- if (req.type !== 'vendor') {
-    return res.status(403).send({message : "Forbidden: Only vendors can request their list of followers!"})
- }
     
 //controlli per page e size che siano corretti 
  //facciamo una sanificazione dei parametri 
@@ -927,7 +1013,18 @@ const getMyFollowers = async(req,res) => {
                 return  res.status(400).send({message: "You have entered a number for the size that's invalid!"})
             }
         }
-    const params = {}
+    
+try {
+const vendorCheckQuery = `
+SELECT username_vendor 
+ FROM Vendors 
+WHERE username_vendor = $1;
+`
+const vendorResult = await pool.query(vendorCheckQuery, [req.user]);
+  if (vendorResult.rows.length === 0) {
+            return res.status(403).send({ message: "Forbidden: Only vendors can request their list of followers!" });
+        }
+ const params = {}
     params.following = req.user
     params.follower = req.query.follower ? `%${req.query.follower}%` : '%' // again riprendiamo tutti i follower se non viene specificato un determinato follower come parametro di query
     params.page= req.query.page ? parseInt(req.query.page) : 0
@@ -942,7 +1039,6 @@ const getMyFollowers = async(req,res) => {
     LIMIT $3 OFFSET $4;
     `
     const qparams = [params.following, params.follower,params.size+1, params.size*params.page ]
-try {
        const results = await pool.query(query, qparams)
        if(results.rows.length > params.size) {
             params.next = params.page +1
@@ -966,7 +1062,7 @@ try {
 // --> followings
 
 const getMyFollowings = async(req,res) => {
- // #swagger.tags = ['Profile']
+ // #swagger.tags = ['Follows']
 // #swagger.summary = 'Retrive current user followings '
 // #swagger.description ='Authenticated endpoint to retrive the list of followings of the currently logged-in user.' 
 
@@ -1032,7 +1128,7 @@ try {
 }
 
 const postMyNewFollowings = async(req,res) => {
-// #swagger.tags = ['Profile']
+// #swagger.tags = ['Follows']
 // #swagger.summary = 'Follow a new vendor'
 // #swagger.description ='Authenticated endpoint allowing the currently logged-in user to follow a specific vendor by providing their username.'
 
@@ -1043,9 +1139,9 @@ try {
 // cuciniamo di nuovo altri controlli (che sorpresa)
 // andiamo a verificare che il vendor che si vuole inziare a seguire ESISTA come prima cosa 
  const userquery = `
- SELECT username
- FROM Users
- WHERE  type = 'vendor' AND username = $1;
+ SELECT username_vendor
+ FROM Vendors
+ WHERE username_vendor = $1;
  `
  // non sia mai che l'utente mi metta degli spazi e non lo trova nel db
 const userqvals = [req.body.following.toString().trim()]
@@ -1054,7 +1150,7 @@ const results_user = await pool.query(userquery, userqvals)
 if (results_user.rows.length === 0 ) {
     return res.status(400).send({message : "Bad Request: This vendor doesn't exist!"})
     }
-const results_username= results_user.rows[0].username
+const results_username= results_user.rows[0].username_vendor
 //controlliamo che uno non sia crazy e voglia seguire se stesso (sia lui un vendor o meno)>> in ogni caso sopratutto se è un vendor anche perchè solo loro possono essere seguiti
 if ( results_username === req.user) {
     return res.status(400).send({message : "Bad Request : You cannot follow yourself!"})
@@ -1081,7 +1177,7 @@ if ( results_username === req.user) {
 }
 
 const deleteFollowing = async(req,res) => {
-// #swagger.tags = ['Profile'] 
+// #swagger.tags = ['Follows'] 
 // #swagger.summary = 'Unfollow a vendor'
 // #swagger.description = 'Authenticated endpoint for unfollowing a vendor that the current-user was following.'
 
@@ -1098,7 +1194,7 @@ console.log(results)
 // se non mi ritorna mulla nelle results.rowCount ci sono due casi: 1)  non esiste , 2) non lo stavi seguendo 
 // sennò di solito rowcount è 1 
 if (results.rowCount === 0 ) {
-    return res.status(404).send({message : "Bad Request: You cannot unfollow a vendor that you are not currently following!"})
+    return res.status(404).send({message : "Not Found: You cannot unfollow a vendor that you are not currently following!"})
     }
 return res.status(204).send()
 } catch (err) {
@@ -1189,10 +1285,6 @@ const postNewProduct = async (req,res) => {
 // #swagger.summary = 'Create a new product'
 // #swagger.description = 'Authenticated endpoint allowing vendors to publish a new product.'
 
-//facciamo un controllo molto importante >> vediamo se è un vendor 
-    if (req.type!== 'vendor' ) {
-        return res.status(403).send({message: "Forbidden: Only vendors can add new products to the catalog!"})
-    }
     if(req.body === undefined) {
       return res.status(400).send({message: "Bad Request: No body provided"})
     }
@@ -1245,6 +1337,19 @@ const postNewProduct = async (req,res) => {
         return res.status(400).send({message: "Bad Request: The file size of a digital product cannot exceed 100 KB"})
     }
 }
+    try {
+    // dobbiamo checkare che sia un vendor 
+    const vendorCheckQuery = `
+    SELECT username_vendor
+    FROM Vendors
+    WHERE username_vendor = $1
+    `
+    const results= await pool.query(vendorCheckQuery,[req.user])
+        // controlliamo l'esistenza dell'utente o che non abbia un image_url che è vuoto
+        if (results.rows.length == 0 ) {
+        return res.status(403).send({message: "Forbidden: Only vendors can add new products to the catalog!"})
+        }
+
     const params = {}
     params.name = req.body.name
     params.description = req.body.description
@@ -1261,9 +1366,8 @@ const postNewProduct = async (req,res) => {
     INSERT INTO Products(name,description, quantity, price, type, byte, weight_in_kg, username_vendor)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8 ) ;
     `
-    try {
-        await pool.query(query, qparams);  
-       return res.status(201).send({ message: "Product created!"  }) 
+     await pool.query(query, qparams);  
+    return res.status(201).send({ message: "Product created!"  }) 
     } catch (err) {
         console.log(err)
         return res.status(500).send({message: "Query error"})
@@ -1297,9 +1401,35 @@ const patchMyProduct = async(req,res) => {
             return res.status(400).send({message: "Bad Request: If you add a quantity it must be a number!"})
          }
     }
-    
+
+    try {
+         const checkQuery = `
+            SELECT username_vendor
+            FROM Products
+            WHERE product_id = $1;
+        `;
+        const checkResult = await pool.query(checkQuery, [product_id]);
+
+        // Se il prodotto non esiste proprio -> 404 Not Found
+        if (checkResult.rows.length === 0) {
+            return res.status(404).send({ message: "Not Found: Product does not exist!" });
+        }
+
+        // Se il prodotto esiste ma appartiene a un altro Vendor -> 403 Forbidden
+        if (checkResult.rows[0].username_vendor !== req.user) {
+            return res.status(403).send({ message: "Forbidden: You are not authorized to edit this product!" });
+        }
+
+        const updateQuery = `
+            UPDATE Products
+            SET name = COALESCE($1, name),
+            description = COALESCE($2, description),
+            quantity = COALESCE($3, quantity)
+            WHERE product_id = $4 AND username_vendor = $5
+            RETURNING *;
+        `;
     const params = {}
-    params.usermname_vendor = req.user 
+    params.username_vendor = req.user 
     params.product_id = req.params.product_id
     params.quantity = (req.body.quantity === undefined || req.body.quantity === "" || req.body.quantity === null ) ? null : parseInt(req.body.quantity)
     params.name = req.body.name
@@ -1307,22 +1437,9 @@ const patchMyProduct = async(req,res) => {
 
 
 
-    const qparams = [params.usermname_vendor, params.product_id, params.quantity, params.name, params.description]
+    const qparams = [params.name, params.description, params.quantity, params.product_id, params.username_vendor]
 
-    const query = `
-    UPDATE Products
-    SET quantity= $3, name= $4, description =$5
-    WHERE username_vendor= $1  AND product_id= $2
-    RETURNING *; 
-    `
-
-    try {
-        const results = await pool.query(query, qparams); 
-
-        if (results.rowCount === 0) {
-            return res.status(404).send({message: "You can't update a product that doesn't exist or isn't yours!"})
-        }
-    
+     await pool.query(updateQuery, qparams); 
        return res.status(200).send({ message: "Product updated!"  }) 
     } catch (err) {
         if (err.code === '23505') {
@@ -1389,16 +1506,15 @@ const getSinglePhotoProduct = async( req,res) => {
     try {  
 
         const query = `
-        SELECT image_url
-        FROM products
+        SELECT product_id
+        FROM Products
         WHERE  product_id = $1;
 
         `
-        const qparams = [req.params.product_id]
-        const results= await pool.query(query, qparams)
+        const results= await pool.query(query, [req.params.product_id])
         // controlliamo l'esistenza dell'utente o che non abbia un image_url che è vuoto
-        if (results.rows.length == 0 || !results.rows[0].image_url) {
-            return res.status(404).send({message: "Image not found!"})
+        if (results.rows.length == 0 ) {
+            return res.status(404).send({message: "This product doesn't exist!"})
         }
        // utilizziamo di nuovo la callback se non trova l'immagine: 
     const file_path = __dirname + "/product_Picture/" + req.params.product_id + ".jpg";
@@ -1433,9 +1549,6 @@ const postMyPhotoProduct = async (req,res) => {
             }
          }
     */ 
-   if (req.type !== 'vendor' ) {
-    return res.status(403).send({message: "Only a vendor can make a post!"})
-   }
   if (!req.params.product_id || req.params.product_id.toString().trim() === "" || isNaN(parseInt(req.params.product_id, 10))) {
         return res.status(400).send({message: "Bad Request: Invalid 'product_id' format!"})
    }
@@ -1453,19 +1566,16 @@ const postMyPhotoProduct = async (req,res) => {
  
 try {
        const query = `
-        UPDATE products
-        SET image_url = $1   
-        WHERE product_id = $2 
-        AND username_vendor = $3;
+        SELECT product_id
+        FROM Products
+        WHERE product_id = $1
     `
+    const prodresults = await pool.query(query,[req.params.product_id])
+    if (prodresults.rows.length == 0 ) {
+            return res.status(404).send({message: "This products doesn't exist!"})
+        }
     // path che vado a salvare nel db 
     const path_db =  "/product_Picture/" + req.params.product_id + ".jpg"
-    const qvals = [path_db,req.params.product_id, req.user];
-   const results =  await pool.query(query, qvals);  
-   // se prova a cercare per un product_id che non esiste tra i suoi articoli
-    if (results.rowCount === 0) {
-        return res.status(404).send({ message : "Product not found within your list of products!"})
-    }
  
     const path_uploaded = __dirname + path_db
     // mv prende il file binario dell'immmagine per poi caricarla sul server utilizzando come posizione il path 
