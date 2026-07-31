@@ -5,7 +5,7 @@ Matricola : 26182A
 Legenda: __chiave primaria__, *chiave esterna*, **attributi unici**, --permette null--
 
 * Users(__username__, **mail**, password, --zip_code--, --city--, --street--, --street_number--, --apartment_floor--, --session_id--)
-* Vendors(__username_vendor__, **VAT_NUMBER**)
+* Vendors(__*username_vendor*__, **VAT_NUMBER**)
 » * foreign key (username_vendor) references Users (username)
 * Products(__product_id__, timestamp_put_on_sale, name, --quantity--, price, description, type, *username_vendor*, --byte--, --weight_in_kg--)
   » * foreign key (username_vendor) references Vendors(username_vendor)

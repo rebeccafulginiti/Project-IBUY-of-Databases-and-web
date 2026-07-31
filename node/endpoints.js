@@ -31,6 +31,11 @@ module.exports = function(app) {
     app.get('/me/image', auth, getMyPhoto)
     app.post('/me/image', auth, postMyPhoto)
     app.patch('/me', auth , patchMe )
+// my reviews
+    app.get('/reviews', auth, getMyReviews)
+    app.post('/reviews', auth, postMyReviews)
+    app.patch('/reviews/:review_id', auth, patchMyReview)
+    app.delete('/reviews/:review_id', auth, deleteMyReview)
 // my purchases
     app.get('/purchases',auth, getMyPurchases)
     app.post('/purchases',auth, postMyNewPurchase)
@@ -835,6 +840,212 @@ const patchMe = async (req,res) => {
     }
 
 }
+
+//my rating
+
+const getMyReviews = async (req,res) => {
+// #swagger.tags = ['Rating']
+// #swagger.summary = 'Fetch personal review collection'
+// #swagger.description = 'Retrieves the personal  reviews that made the logged-in user. Supports pagination via query parameters.'
+
+//controlli per page e size che siano corretti 
+ //facciamo una sanificazione dei parametri 
+  if (req.query.page !== undefined && req.query.page !== "" ) {
+            if ((isNaN(req.query.page)) || (req.query.page < 0) ) {
+                return  res.status(400).send({message: "Bad Request: You have entered a number for the page that's invalid !"})
+            }
+        }
+   if (req.query.size !== undefined && req.query.size !== "" ) {
+            if ((isNaN(req.query.size)) || (req.query.size < 0 || req.query.size > 50) ) {
+                return  res.status(400).send({message: "Bad Request: You have entered a number for the size that's invalid!"})
+            }
+        }
+   // controllo rating
+    if (req.query.rating !== undefined && req.query.rating !== null && req.query.rating.toString().trim() !== "" ) {
+            if (isNaN(Number(req.query.rating))|| (req.query.rating < 1 || req.query.rating > 5 )) {
+                return  res.status(400).send({message: "Bad Request: You have entered a rating that's invalid!It must be a number between 1 and 5!"})
+            }
+        }
+    const params = {}
+        //se ciò che c'è tra parentesi non è vero allora parti dala pagina zero 
+        params.page= req.query.page ? parseInt(req.query.page) : 0
+        params.size = req.query.size ?  parseInt(req.query.size) : 20 
+        params.rating = (req.query.rating === undefined || req.query.rating === null  || req.query.rating.toString().trim() === "") ? null : Number(req.query.rating)
+        params.previous= params.page > 0 ? params.page -1 : null
+        params.next = null 
+
+    const query = `
+     SELECT *
+    FROM Reviews
+    WHERE username_buyer = $1 
+    AND rating = COALESCE($2, rating)
+    LIMIT $3 OFFSET $4; 
+    `
+    //OFFSET è quanti elementi devo saltare e LIMIT quanti ne devo mostare
+    const qparams = [req.user,params.rating, params.size+1, params.size*params.page]
+    try {
+       const results = await pool.query(query, qparams);
+
+       if(results.rows.length > params.size) {
+            params.next = params.page +1
+             results.rows= results.rows.slice(0,-1)
+        }
+
+     params.results = results.rows;
+
+     return res.status(200).send({
+         message: "Users list retrieved successfully!" ,
+         res : params.results
+        })
+
+    } catch (err) {
+        console.log(err)
+        return res.status(500).send({message: "Query error"})
+    }
+   
+}
+
+const postMyReviews = async (req,res) => {
+// #swagger.tags = ['Rating']
+// #swagger.summary = 'Posts a personal review of a product'
+// #swagger.description = 'Posts the personal  reviews that made the logged-in user about a product that bought.'
+//controlliamo un po' il product id che ci sia e che sia un numero
+   if (!req.body || req.body.product_id === undefined || req.body.product_id === "") {
+        return res.status(400).send({ message: "Bad Request: Product_id is required and cannot be empty!" });
+    }
+    if (isNaN(Number(req.body.product_id))){
+        return res.status(400).send({ message: "Bad Request: Product_id must be a valid number!" });
+    }
+    const product_id_parsata = parseInt(req.body.product_id, 10);
+    if (isNaN(product_id_parsata)) {
+        return res.status(400).send({ message: "Bad Request: Product_id must be a valid number!" });
+    }
+     // controllo rating
+    if (req.body.rating !== undefined && req.body.rating !== null && req.body.rating.toString().trim() !== "" ) {
+            if (isNaN(Number(req.body.rating))|| (req.body.rating < 1 || req.body.rating > 5 )) {
+                return  res.status(400).send({message: "Bad Request: You have entered a rating that's invalid!It must be a number between 1 and 5!"})
+            }
+        }
+    //controlliamo nel caso il comment se rispetta il fatto che non debba essere troppo lungo 
+    if (req.body.comment !== undefined && req.body.comment !== null && req.body.comment.toString().trim() !== "" ) {
+            if (req.body.comment.toString().length > 100) {
+                return  res.status(400).send({message: "Bad Request: You have entered a rating that's invalid!It must be a number between 1 and 5!"})
+            }
+        }
+    try {
+    //vediamo se esite il product_id
+    const productquery = `
+      SELECT Pu.product_id, P.username_vendor
+      FROM Purchases  AS Pu  
+      LEFT JOIN Products AS P
+      ON (Pu.product_id = P.product_id)
+      WHERE Pu.product_id = $1 AND Pu.username_buyer=$2;
+    `
+
+    const results = await pool.query(productquery,[ product_id_parsata, req.user])
+    if (results.rows.length != 1 ) {
+    return res.status(400).send({message : "Bad Request: Product doesn't exist!"})
+    }
+
+    // dopo che abbaimo verificato che il product id e abbiamo anche il nome del vendor inseriamolo  
+    
+ const username_vendor_extract = results.rows[0].username_vendor
+
+    //finally posso fare la query e aggiungere l'acquisto
+    const query = `
+    INSERT INTO Reviews ( username_buyer, username_vendor, product_id, rating, comment )
+    VALUES ($1, $2, $3, $4, $5);
+    `
+    const params = {}
+    params.rating = req.body.rating
+    params.comment = req.body.comment === undefined || req.body.comment.toString().trim() === "" ? null : req.body.comment
+    const qparams= [ req.user, username_vendor_extract, product_id_parsata,params.rating,params.comment ]
+     await pool.query(query, qparams)
+     return res.status(201).send({ message: "Review added!"  }) 
+    } catch(err) {
+        console.error(err)
+        return res.status(500).send({message: "Query error"})
+    }
+
+}
+
+const patchMyReview = async (req,res) => {
+// #swagger.tags = ['Rating']
+// #swagger.summary = 'Update the review of a product'
+// #swagger.description = 'Update the review that made the currently logged-in user about a product that he bought.'
+
+  if (req.body === undefined) {
+      return res.status(400).send({message: "Bad Request: No body provided"})
+    }  
+    // controllo rating
+    if (req.body.rating !== undefined && req.body.rating !== null && req.body.rating.toString().trim() !== "" ) {
+            if (isNaN(Number(req.body.rating))|| (req.body.rating < 1 || req.body.rating > 5 )) {
+                return  res.status(400).send({message: "Bad Request: You have entered a rating that's invalid!It must be a number between 1 and 5!"})
+            }
+        }
+      //controlliamo nel caso il comment se rispetta il fatto che non debba essere troppo lungo 
+    if (req.body.comment !== undefined && req.body.comment !== null && req.body.comment.toString().trim() !== "" ) {
+            if (req.body.comment.toString().length > 100) {
+                return  res.status(400).send({message: "Bad Request: You have entered a rating that's invalid!It must be a number between 1 and 5!"})
+            }
+        }
+    //controllo su review_id 
+    if (req.params.review_id !== undefined && req.params.review_id !== null && req.params.review_id.toString().trim() !== "" ) {
+            if (isNaN(Number(req.params.review_id)) || (req.params.rating < 1 || req.params.rating > 5 )) {
+                return  res.status(400).send({message: "Bad Request: You have entered a review id that's invalid or that's missing!"})
+            }
+        }
+     try {
+    
+        const query = `
+        UPDATE Reviews
+        SET rating = $2,
+        comment = COALESCE($3, comment)
+        WHERE review_id = $1;
+        ` 
+        const params = {}
+        params.review_id=  Number(req.params.review_id)
+        params.rating = Number(req.body.rating)
+        params.comment = req.body.comment === undefined || req.body.comment.toString().trim() === "" ? null : req.body.comment
+        const qparams = [params.review_id, params.rating, params.comment]
+            await pool.query(query,qparams );  
+       
+        return res.status(200).send({ message: "Review updated!" }) 
+    } catch (err) {
+    // gestiamo err  così con il code senza fare un'altra query al db per non anadre in una situation di race condition
+        console.log(err)
+        return res.status(500).send({message: "Query error"})
+    }
+
+}
+
+const deleteMyReview = async (req,res) => {
+// #swagger.tags = ['Rating']
+// #swagger.summary = 'Delete the review of a product'
+// #swagger.description = 'Delete the review that made the currently logged-in user about a product that he bought.'
+
+try {
+    const query = `
+    DELETE  
+    FROM Reviews
+    WHERE review_id = $1 AND username_buyer= $2;
+    `
+const qvals = [req.params.review_id, req.user]
+
+   const results= await pool.query(query, qvals)
+   if (results.rows.length != 1) {
+    return res.status(404).send("Not Found: The review you are trying to delete doesn't exist!")
+   }
+   return  res.status(200).send({message: "Logged out!"})
+} catch (err) {
+    console.log(err)
+    return res.status(500).send({message: "Query error"})
+}
+
+}
+
+
+
 
 
 //my purchases

@@ -751,7 +751,7 @@ Rispetto alla sotto-risorsa FOLLOWERS in cui la richiesta effettuata dal vendor 
           "size": 20,
           "page": 0,
           "q": "r",
-          "next": "/users/me/followers?follower=r&size=20&page=1",
+          "next": "/me/followers?follower=r&size=20&page=1",
           "prev": null,
           "res": [
             { "follower": "r-pippo"},
@@ -812,7 +812,7 @@ La sotto-risorsa FOLLOWINGS espone, a uno user autenticato, la lista di chi lui 
           "size": 20,
           "page": 0,
           "q": "r",
-          "next": "/users/me/followings?q=r&size=20&page=1",
+          "next": "/me/followings?q=r&size=20&page=1",
           "prev": null,
           "res": [
 				 {
@@ -880,7 +880,7 @@ La sotto-risorsa FOLLOWINGS espone, a uno user autenticato, la lista di chi lui 
   Headers: 
     `Authorization:  Bearer <token>`
    
-    `POST //followings`
+    `POST /followings`
     
     - Richiesta: `username_vendor` 
     - CODE: 
@@ -896,6 +896,14 @@ La sotto-risorsa FOLLOWINGS espone, a uno user autenticato, la lista di chi lui 
       WHERE username_vendor = $1;
       - `username_vendor`del vendor che si vuole  iniziare a seguire.
   → Questa query viene eseguita per verificare l'effettiva esistenza del vendor nel sistema.
+
+    INSERT INTO Follows ( follower, following )
+    VALUES ($1, $2);
+    $1 : username dello user richiedente. Questo valore non viene inserito manualmente
+    dallo user, ma viene estratto automaticamente dal sistema tramite il token di
+    autenticazione.
+    $2 : username del vendor che si è iniziato a seguire
+    
 
 # SPECIFICO FOLLOWING 
 
